@@ -1,0 +1,40 @@
+{
+  "name": "MCP-UI Dev",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "22",
+      "pnpmVersion": "10.11.0"
+    }
+  },
+
+  // Install all workspace deps + build the TypeScript SDKs
+  "postCreateCommand": "pnpm install && pnpm build",
+
+  // Auto-start the onet-demo MCP server on every codespace start
+  "postStartCommand": "cd examples/onet-demo && pnpm dev &",
+
+  "forwardPorts": [3002],
+  "portsAttributes": {
+    "3002": {
+      "label": "MCP Server (onet-demo)",
+      "onAutoForward": "notify",
+      "visibility": "public"
+    }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint",
+        "ms-vscode.vscode-typescript-next"
+      ],
+      "settings": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.formatOnSave": true
+      }
+    }
+  }
+}
