@@ -25,12 +25,18 @@ export interface ClientCapabilitiesWithExtensions extends ClientCapabilities {
 export const UI_EXTENSION_NAME = 'io.modelcontextprotocol/ui' as const;
 
 /**
+ * MIME type produced by the Apps SDK (ChatGPT / Skybridge) server-side connector.
+ */
+export const APPS_SDK_MIME_TYPE = 'text/html+skybridge' as const;
+
+/**
  * UI extension capability configuration.
  *
- * Declares support for rendering UI resources with specific MIME types.
+ * Declares support for rendering UI resources with specific MIME types, including
+ * resources wrapped by the MCP Apps and Apps SDK (Skybridge) server-side connectors.
  */
 export const UI_EXTENSION_CONFIG = {
-  mimeTypes: [RESOURCE_MIME_TYPE],
+  mimeTypes: [RESOURCE_MIME_TYPE, APPS_SDK_MIME_TYPE],
 } as const;
 
 /**

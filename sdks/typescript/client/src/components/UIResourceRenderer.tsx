@@ -28,6 +28,17 @@ function getContentType(
   if (resource.mimeType === 'text/uri-list') {
     return 'externalUrl';
   }
+  // Adapter MIME types produced by server-side connectors:
+  //   'text/html;profile=mcp-app' – MCP Apps SEP adapter
+  //   'text/html+skybridge'       – Apps SDK (ChatGPT) adapter
+  // Both route to HTMLResourceRenderer, which performs content-based detection
+  // (URL vs raw HTML) via processHTMLResource at render time.
+  if (
+    resource.mimeType === 'text/html;profile=mcp-app' ||
+    resource.mimeType === 'text/html+skybridge'
+  ) {
+    return 'rawHtml';
+  }
   if (resource.mimeType?.startsWith('application/vnd.mcp-ui.remote-dom')) {
     return 'remoteDom';
   }

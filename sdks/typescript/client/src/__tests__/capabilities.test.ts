@@ -4,6 +4,7 @@ import {
   UI_EXTENSION_NAME,
   UI_EXTENSION_CONFIG,
   UI_EXTENSION_CAPABILITIES,
+  APPS_SDK_MIME_TYPE,
 } from '../capabilities';
 import { RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/app-bridge';
 
@@ -12,9 +13,13 @@ describe('UI Extension Capabilities', () => {
     expect(UI_EXTENSION_NAME).toBe('io.modelcontextprotocol/ui');
   });
 
-  it('should include RESOURCE_MIME_TYPE in mimeTypes', () => {
+  it('should include RESOURCE_MIME_TYPE and Apps SDK MIME type in mimeTypes', () => {
     expect(UI_EXTENSION_CONFIG.mimeTypes).toContain(RESOURCE_MIME_TYPE);
-    expect(UI_EXTENSION_CONFIG.mimeTypes).toEqual(['text/html;profile=mcp-app']);
+    expect(UI_EXTENSION_CONFIG.mimeTypes).toContain(APPS_SDK_MIME_TYPE);
+    expect(UI_EXTENSION_CONFIG.mimeTypes).toEqual([
+      'text/html;profile=mcp-app',
+      'text/html+skybridge',
+    ]);
   });
 
   it('should structure capabilities with extension name as key', () => {

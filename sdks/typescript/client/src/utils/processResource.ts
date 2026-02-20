@@ -18,11 +18,28 @@ function isValidHttpUrl(string: string): boolean {
   return url.protocol === 'http:' || url.protocol === 'https:';
 }
 
+/**
+ * MIME types produced by MCP-UI server-side adapters (connectors).
+ * - 'text/html;profile=mcp-app'  – MCP Apps SEP adapter
+ * - 'text/html+skybridge'        – Apps SDK (ChatGPT) adapter
+ *
+ * These types can carry either raw HTML (rawHtml) or a plain URL string (externalUrl).
+ * The correct rendering mode is detected by inspecting the content at runtime.
+ */
+const ADAPTER_MIME_TYPES: ReadonlySet<string> = new Set([
+  'text/html;profile=mcp-app',
+  'text/html+skybridge',
+]);
+
 export function processHTMLResource(
   resource: Partial<Resource>,
   proxy?: string,
 ): ProcessResourceResult {
-  if (resource.mimeType !== 'text/html' && resource.mimeType !== 'text/uri-list') {
+  if (
+    resource.mimeType !== 'text/html' &&
+    resource.mimeType !== 'text/uri-list' &&
+    !ADAPTER_MIME_TYPES.has(resource.mimeType ?? '')
+  ) {
     return {
       error:
         'Resource must be of type text/html (for HTML content) or text/uri-list (for URL content).',
@@ -109,8 +126,10 @@ export function processHTMLResource(
       iframeSrc: originalUrl,
       iframeRenderMode: 'src',
     };
-  } else if (resource.mimeType === 'text/html') {
-    // Handle HTML content
+  } else if (resource.mimeType === 'text/html' || ADAPTER_MIME_TYPES.has(resource.mimeType ?? '')) {
+    // Handle HTML content (text/html) and adapter MIME types (text/html;profile=mcp-app,
+    // text/html+skybridge). Adapter types may carry either raw HTML or a plain URL string
+    // (externalUrl case); the correct mode is determined by inspecting the decoded content.
     let htmlContent = '';
 
     if ('text' in resource && typeof resource.text === 'string') {
@@ -129,6 +148,37 @@ export function processHTMLResource(
     } else {
       return {
         error: 'HTML resource requires text or blob content.',
+      };
+    }
+
+    // For adapter MIME types, a plain URL in the content means an externalUrl resource.
+    // The server embeds the URL string directly when content.type === 'externalUrl'.
+    if (ADAPTER_MIME_TYPES.has(resource.mimeType ?? '') && isValidHttpUrl(htmlContent.trim())) {
+      const iframeUrl = htmlContent.trim();
+      if (proxy && proxy.trim() !== '') {
+        try {
+          const proxyUrl = new URL(proxy);
+          if (typeof window !== 'undefined' && proxyUrl.host === window.location.host) {
+            console.error(
+              'For security, the proxy origin must not be the same as the host origin. Using original URL instead.',
+            );
+          } else {
+            proxyUrl.searchParams.set('url', iframeUrl);
+            return {
+              iframeSrc: proxyUrl.toString(),
+              iframeRenderMode: 'src',
+            };
+          }
+        } catch (e: unknown) {
+          console.error(
+            `Invalid proxy URL provided: "${proxy}". Falling back to direct URL.`,
+            e instanceof Error ? e.message : String(e),
+          );
+        }
+      }
+      return {
+        iframeSrc: iframeUrl,
+        iframeRenderMode: 'src',
       };
     }
 

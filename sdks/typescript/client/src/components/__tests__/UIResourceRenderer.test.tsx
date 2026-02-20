@@ -54,6 +54,22 @@ describe('<UIResourceRenderer />', () => {
     );
   });
 
+  it('should render HTMLResourceRenderer for "text/html;profile=mcp-app" mimeType (MCP Apps adapter)', () => {
+    const resource = { ...baseResource, mimeType: 'text/html;profile=mcp-app' };
+    render(<UIResourceRenderer resource={resource} />);
+    expect(screen.getByTestId('html-resource')).toBeInTheDocument();
+    expect(RemoteDOMResourceRenderer).not.toHaveBeenCalled();
+    expect(HTMLResourceRenderer).toHaveBeenCalledWith({ resource }, {});
+  });
+
+  it('should render HTMLResourceRenderer for "text/html+skybridge" mimeType (Apps SDK adapter)', () => {
+    const resource = { ...baseResource, mimeType: 'text/html+skybridge' };
+    render(<UIResourceRenderer resource={resource} />);
+    expect(screen.getByTestId('html-resource')).toBeInTheDocument();
+    expect(RemoteDOMResourceRenderer).not.toHaveBeenCalled();
+    expect(HTMLResourceRenderer).toHaveBeenCalledWith({ resource }, {});
+  });
+
   it('should render an unsupported message for an unknown mimeType', () => {
     const resource = { ...baseResource, mimeType: 'application/unknown' };
     render(<UIResourceRenderer resource={resource} />);

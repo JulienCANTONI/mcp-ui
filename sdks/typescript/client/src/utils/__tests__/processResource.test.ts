@@ -311,6 +311,77 @@ describe('processHTMLResource', () => {
     });
   });
 
+  describe('adapter MIME types (text/html;profile=mcp-app and text/html+skybridge)', () => {
+    const ADAPTER_MIME_TYPES = [
+      'text/html;profile=mcp-app' as const,
+      'text/html+skybridge' as const,
+    ];
+
+    for (const mimeType of ADAPTER_MIME_TYPES) {
+      describe(mimeType, () => {
+        it('should render as srcDoc when content is raw HTML', () => {
+          const html = '<h1>Hello from adapter</h1>';
+          const resource = { mimeType, text: html };
+          const result = processHTMLResource(resource);
+          expect(result.error).toBeUndefined();
+          expect(result.htmlString).toBe(html);
+          expect(result.iframeRenderMode).toBe('srcDoc');
+        });
+
+        it('should render as src when content is a URL (externalUrl case)', () => {
+          const resource = { mimeType, text: 'https://example.com' };
+          const result = processHTMLResource(resource);
+          expect(result.error).toBeUndefined();
+          expect(result.iframeSrc).toBe('https://example.com');
+          expect(result.iframeRenderMode).toBe('src');
+        });
+
+        it('should decode HTML from blob and render as srcDoc', () => {
+          const html = '<p>Blob HTML via adapter</p>';
+          const resource = { mimeType, blob: btoa(html) };
+          const result = processHTMLResource(resource);
+          expect(result.error).toBeUndefined();
+          expect(result.htmlString).toBe(html);
+          expect(result.iframeRenderMode).toBe('srcDoc');
+        });
+
+        it('should decode a URL from blob and render as src', () => {
+          const resource = { mimeType, blob: btoa('https://example.com') };
+          const result = processHTMLResource(resource);
+          expect(result.error).toBeUndefined();
+          expect(result.iframeSrc).toBe('https://example.com');
+          expect(result.iframeRenderMode).toBe('src');
+        });
+
+        it('should return an error when neither text nor blob is provided', () => {
+          const resource = { mimeType };
+          const result = processHTMLResource(resource);
+          expect(result.error).toBe('HTML resource requires text or blob content.');
+        });
+
+        it('should use proxy for HTML content', () => {
+          const html = '<h1>Proxied HTML</h1>';
+          const resource = { mimeType, text: html };
+          const result = processHTMLResource(resource, 'https://proxy.mcpui.dev/');
+          expect(result.error).toBeUndefined();
+          expect(result.iframeRenderMode).toBe('src');
+          expect(result.iframeSrc).toBe('https://proxy.mcpui.dev/?contentType=rawhtml');
+          expect(result.htmlString).toBe(html);
+        });
+
+        it('should use proxy for URL content', () => {
+          const resource = { mimeType, text: 'https://example.com' };
+          const result = processHTMLResource(resource, 'https://proxy.mcpui.dev/');
+          expect(result.error).toBeUndefined();
+          expect(result.iframeSrc).toBe(
+            'https://proxy.mcpui.dev/?url=https%3A%2F%2Fexample.com',
+          );
+          expect(result.iframeRenderMode).toBe('src');
+        });
+      });
+    }
+  });
+
   describe('Unsupported mimeType', () => {
     it('should return an error for an unsupported mimeType', () => {
       const resource = {
