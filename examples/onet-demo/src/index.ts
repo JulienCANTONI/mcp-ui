@@ -9,8 +9,8 @@
  * which is one of the two connectors integrated in the client SDK.
  *
  * Configuration (via environment variables, never hardcoded):
- *   ONET_USERNAME  – O*NET Web Services username (optional, enables live API)
- *   ONET_PASSWORD  – O*NET Web Services password (optional)
+ *   ONET_USERNAME  – O*NET Web Services username
+ *   ONET_PASSWORD  – O*NET Web Services API key
  *
  * Copy .env.example → .env and fill in your credentials.
  * The .env file is git-ignored and will never be committed.
@@ -18,6 +18,8 @@
  * Run:  pnpm dev   (from this directory)
  * Port: 3002
  */
+
+import 'dotenv/config'; // loads .env before anything else
 
 import express from 'express';
 import cors from 'cors';
@@ -28,20 +30,59 @@ import { createUIResource } from '@mcp-ui/server';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
 
-// ---------------------------------------------------------------------------
-// Credentials — read from environment, never hardcoded
-// ---------------------------------------------------------------------------
-export const ONET_CREDENTIALS =
-  process.env.ONET_USERNAME && process.env.ONET_PASSWORD
-    ? { username: process.env.ONET_USERNAME, password: process.env.ONET_PASSWORD }
-    : null;
-
 import { searchOccupations, getOccupation, OCCUPATIONS } from './onet-data.js';
+import { liveSearch, liveOccupationSummary, type OnetReport } from './onet-client.js';
+import type { OnetOccupation } from './onet-data.js';
 import {
   buildSearchResultsHTML,
   buildOccupationDetailHTML,
   buildSummaryHTML,
 } from './ui-templates.js';
+
+// ---------------------------------------------------------------------------
+// Credentials — read from environment, never hardcoded
+// ---------------------------------------------------------------------------
+const ONET_CREDENTIALS =
+  process.env.ONET_USERNAME && process.env.ONET_PASSWORD
+    ? { username: process.env.ONET_USERNAME, password: process.env.ONET_PASSWORD }
+    : null;
+
+// ---------------------------------------------------------------------------
+// Map live O*NET API response → internal OnetOccupation shape
+// ---------------------------------------------------------------------------
+function mapLiveOccupation(
+  summary: OnetReport,
+  tags?: { bright_outlook?: boolean; green?: boolean },
+): OnetOccupation {
+  const wage = summary.wages?.wage?.[0];
+  const outlookName = (summary.outlook?.category?.name ?? 'Average') as OnetOccupation['outlook'];
+
+  // Education: pick the most-common category
+  const eduCategories = summary.education?.education_usually_needed?.category ?? [];
+  const topEdu = eduCategories.sort((a, b) => b.percent - a.percent)[0];
+
+  return {
+    code: summary.occupation.code,
+    title: summary.occupation.title,
+    description: summary.occupation.description,
+    bright_outlook: tags?.bright_outlook ?? false,
+    green: tags?.green ?? false,
+    in_demand: false,
+    tasks: [],
+    skills: (summary.skills?.element ?? [])
+      .slice(0, 8)
+      .map((e) => ({ name: e.name, level: Math.round(e.score.value) })),
+    knowledge: (summary.knowledge?.element ?? [])
+      .slice(0, 6)
+      .map((e) => ({ name: e.name, level: Math.round(e.score.value) })),
+    work_styles: (summary.work_styles?.element ?? []).slice(0, 6).map((e) => e.name),
+    education: topEdu?.name ?? 'N/A',
+    median_wage: wage?.pct50 ?? 0,
+    employment: wage?.employment ?? 0,
+    outlook: outlookName,
+    tags: [],
+  };
+}
 
 const app = express();
 const PORT = 3002;
@@ -71,17 +112,40 @@ function createMcpServer(): McpServer {
       },
     },
     async ({ keyword }) => {
-      const results = searchOccupations(keyword);
+      let results: OnetOccupation[];
 
-      // Build two resources:
-      //   1. A compact summary card (inline in chat)
-      //   2. A full search results page
+      if (ONET_CREDENTIALS) {
+        // ── Live O*NET API ──────────────────────────────────────────────────
+        try {
+          const apiResults = await liveSearch(keyword, ONET_CREDENTIALS);
+          const occupations = apiResults.occupation ?? [];
+
+          // Fetch summaries in parallel (up to 5 results)
+          const summaries = await Promise.all(
+            occupations.slice(0, 5).map(async (o) => {
+              try {
+                const summary = await liveOccupationSummary(o.code, ONET_CREDENTIALS!);
+                return mapLiveOccupation(summary, o.tags);
+              } catch {
+                return null;
+              }
+            }),
+          );
+
+          results = summaries.filter((s): s is OnetOccupation => s !== null);
+        } catch (err) {
+          console.error('[onet] Live API error, falling back to embedded data:', err);
+          results = searchOccupations(keyword);
+        }
+      } else {
+        // ── Embedded dataset ────────────────────────────────────────────────
+        results = searchOccupations(keyword);
+      }
 
       const summaryResource = createUIResource({
         uri: `ui://onet/search-summary/${encodeURIComponent(keyword)}`,
         content: { type: 'rawHtml', htmlString: buildSummaryHTML(results) },
         encoding: 'text',
-        // MCP Apps SEP adapter connector — produces text/html;profile=mcp-app
         adapters: { mcpApps: { enabled: true } },
         uiMetadata: { 'preferred-frame-size': ['100%', '280px'] },
       });
@@ -90,7 +154,6 @@ function createMcpServer(): McpServer {
         uri: `ui://onet/search-full/${encodeURIComponent(keyword)}`,
         content: { type: 'rawHtml', htmlString: buildSearchResultsHTML(keyword, results) },
         encoding: 'text',
-        // MCP Apps SEP adapter connector
         adapters: { mcpApps: { enabled: true } },
         uiMetadata: { 'preferred-frame-size': ['100%', '600px'] },
       });
@@ -108,11 +171,7 @@ function createMcpServer(): McpServer {
           : `No occupations found for "${keyword}". Try a broader term.`;
 
       return {
-        content: [
-          { type: 'text', text: textSummary },
-          summaryResource,
-          fullResource,
-        ],
+        content: [{ type: 'text', text: textSummary }, summaryResource, fullResource],
       };
     },
   );
@@ -132,7 +191,20 @@ function createMcpServer(): McpServer {
       },
     },
     async ({ code }) => {
-      const occ = getOccupation(code);
+      let occ: OnetOccupation | undefined;
+
+      if (ONET_CREDENTIALS) {
+        // ── Live O*NET API ──────────────────────────────────────────────────
+        try {
+          const summary = await liveOccupationSummary(code, ONET_CREDENTIALS);
+          occ = mapLiveOccupation(summary);
+        } catch (err) {
+          console.error(`[onet] Live API error for ${code}, trying embedded data:`, err);
+          occ = getOccupation(code);
+        }
+      } else {
+        occ = getOccupation(code);
+      }
 
       if (!occ) {
         return {
@@ -140,8 +212,9 @@ function createMcpServer(): McpServer {
             {
               type: 'text',
               text:
-                `Occupation code "${code}" not found in the local dataset.\n` +
-                `Available codes: ${OCCUPATIONS.map((o) => o.code).join(', ')}`,
+                `Occupation code "${code}" not found.\n` +
+                `Try onet_search first to get valid codes.\n` +
+                `Embedded codes: ${OCCUPATIONS.map((o) => o.code).join(', ')}`,
             },
           ],
         };
@@ -151,7 +224,6 @@ function createMcpServer(): McpServer {
         uri: `ui://onet/occupation/${occ.code}`,
         content: { type: 'rawHtml', htmlString: buildOccupationDetailHTML(occ) },
         encoding: 'text',
-        // MCP Apps SEP adapter connector
         adapters: { mcpApps: { enabled: true } },
         uiMetadata: { 'preferred-frame-size': ['100%', '700px'] },
       });
@@ -180,14 +252,16 @@ function createMcpServer(): McpServer {
   server.registerTool(
     'onet_list',
     {
-      title: 'List all O*NET Occupations',
-      description: 'List all occupations available in this demo dataset.',
+      title: 'List O*NET Occupations',
+      description: ONET_CREDENTIALS
+        ? 'List occupations from the embedded dataset (use onet_search for the full O*NET catalog).'
+        : 'List all occupations in the embedded dataset.',
       inputSchema: {},
     },
     async () => {
       const lines = OCCUPATIONS.map((o) => `• ${o.code}  ${o.title}`).join('\n');
       return {
-        content: [{ type: 'text', text: `Available occupations:\n${lines}` }],
+        content: [{ type: 'text', text: `Embedded occupations:\n${lines}` }],
       };
     },
   );
@@ -247,27 +321,21 @@ app.get('/', (_req, res) => {
   res.json({
     name: 'O*NET MCP Server',
     version: '1.0.0',
+    mode: ONET_CREDENTIALS ? 'live' : 'embedded',
     tools: ['onet_search', 'onet_details', 'onet_list'],
     endpoint: `http://localhost:${PORT}/mcp`,
-    description:
-      'MCP server exposing O*NET occupational data via MCP-UI with the MCP Apps adapter connector.',
   });
 });
 
 app.listen(PORT, () => {
   console.log(`\n🏷️  O*NET MCP Server running at http://localhost:${PORT}`);
   console.log(`   MCP endpoint: http://localhost:${PORT}/mcp`);
-  console.log(`\n   Tools available:`);
-  console.log(`   • onet_search  — search by keyword (e.g. "developer", "nurse")`);
-  console.log(`   • onet_details — get details by SOC code (e.g. "15-1252.00")`);
-  console.log(`   • onet_list    — list all occupations in the dataset`);
+  console.log(`\n   Tools: onet_search | onet_details | onet_list`);
   console.log(`\n   Adapter connector: MCP Apps SEP (text/html;profile=mcp-app)`);
   if (ONET_CREDENTIALS) {
-    console.log(`\n   ✅ O*NET credentials loaded from environment (live API enabled)`);
+    console.log(`\n   ✅ Live mode — calling services.onetcenter.org (user: ${ONET_CREDENTIALS.username})`);
   } else {
-    console.log(`\n   ℹ️  No O*NET credentials found — using embedded dataset`);
-    console.log(`      Copy .env.example → .env and set ONET_USERNAME / ONET_PASSWORD`);
-    console.log(`      to enable live calls to services.onetcenter.org`);
+    console.log(`\n   ℹ️  Embedded mode — copy .env.example → .env to enable live API`);
   }
   console.log();
 });
