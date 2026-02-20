@@ -19,11 +19,34 @@ This example validates the connector integration added in the client SDK.
 # From repo root
 pnpm install
 
-# Start the server
+# Configure your O*NET credentials (never commit the .env file!)
 cd examples/onet-demo
+cp .env.example .env
+# Edit .env and set ONET_USERNAME / ONET_PASSWORD
+# (register at https://services.onetcenter.org/developer/)
+
+# Start the server
 pnpm dev
 # → http://localhost:3002
 ```
+
+### Credentials & Security
+
+Credentials are read from environment variables — **never hardcoded**.
+
+| File | Committed? | Purpose |
+|------|-----------|---------|
+| `.env.example` | ✅ Yes | Template showing required variables (no real values) |
+| `.env` | ❌ No (git-ignored) | Your actual credentials — stays on your machine |
+
+```bash
+# .env (git-ignored — never committed)
+ONET_USERNAME=your_username_here
+ONET_PASSWORD=your_password_here
+```
+
+If no credentials are set the server runs with the embedded dataset.
+If credentials are provided they are used for live O*NET API calls.
 
 ## Connect with an MCP Client
 

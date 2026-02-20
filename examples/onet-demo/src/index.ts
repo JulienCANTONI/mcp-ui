@@ -8,6 +8,13 @@
  * The resources use the MCP Apps adapter connector (text/html;profile=mcp-app)
  * which is one of the two connectors integrated in the client SDK.
  *
+ * Configuration (via environment variables, never hardcoded):
+ *   ONET_USERNAME  – O*NET Web Services username (optional, enables live API)
+ *   ONET_PASSWORD  – O*NET Web Services password (optional)
+ *
+ * Copy .env.example → .env and fill in your credentials.
+ * The .env file is git-ignored and will never be committed.
+ *
  * Run:  pnpm dev   (from this directory)
  * Port: 3002
  */
@@ -20,6 +27,14 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createUIResource } from '@mcp-ui/server';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
+
+// ---------------------------------------------------------------------------
+// Credentials — read from environment, never hardcoded
+// ---------------------------------------------------------------------------
+export const ONET_CREDENTIALS =
+  process.env.ONET_USERNAME && process.env.ONET_PASSWORD
+    ? { username: process.env.ONET_USERNAME, password: process.env.ONET_PASSWORD }
+    : null;
 
 import { searchOccupations, getOccupation, OCCUPATIONS } from './onet-data.js';
 import {
@@ -246,5 +261,13 @@ app.listen(PORT, () => {
   console.log(`   • onet_search  — search by keyword (e.g. "developer", "nurse")`);
   console.log(`   • onet_details — get details by SOC code (e.g. "15-1252.00")`);
   console.log(`   • onet_list    — list all occupations in the dataset`);
-  console.log(`\n   Adapter connector: MCP Apps SEP (text/html;profile=mcp-app)\n`);
+  console.log(`\n   Adapter connector: MCP Apps SEP (text/html;profile=mcp-app)`);
+  if (ONET_CREDENTIALS) {
+    console.log(`\n   ✅ O*NET credentials loaded from environment (live API enabled)`);
+  } else {
+    console.log(`\n   ℹ️  No O*NET credentials found — using embedded dataset`);
+    console.log(`      Copy .env.example → .env and set ONET_USERNAME / ONET_PASSWORD`);
+    console.log(`      to enable live calls to services.onetcenter.org`);
+  }
+  console.log();
 });
