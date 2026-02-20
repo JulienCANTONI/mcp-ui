@@ -42,6 +42,10 @@ import {
 // ---------------------------------------------------------------------------
 // Credentials — read from environment, never hardcoded
 // ---------------------------------------------------------------------------
+
+/** Optional API key to protect the public MCP endpoint (set MCP_API_KEY in .env) */
+const MCP_API_KEY = process.env.MCP_API_KEY ?? null;
+
 const ONET_CREDENTIALS =
   process.env.ONET_USERNAME && process.env.ONET_PASSWORD
     ? { username: process.env.ONET_USERNAME, password: process.env.ONET_PASSWORD }
@@ -270,6 +274,23 @@ function createMcpServer(): McpServer {
 }
 
 // ---------------------------------------------------------------------------
+// Optional API key middleware (for public deployments)
+// ---------------------------------------------------------------------------
+function checkApiKey(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (!MCP_API_KEY) return next(); // no key required in dev mode
+  const provided =
+    req.headers['x-api-key'] ??
+    req.headers.authorization?.replace(/^Bearer\s+/i, '');
+  if (provided !== MCP_API_KEY) {
+    res.status(401).json({ error: { message: 'Unauthorized: invalid API key' } });
+    return;
+  }
+  next();
+}
+
+app.use('/mcp', checkApiKey);
+
+// ---------------------------------------------------------------------------
 // HTTP transport
 // ---------------------------------------------------------------------------
 app.post('/mcp', async (req, res) => {
@@ -316,14 +337,16 @@ const handleSession = async (req: express.Request, res: express.Response) => {
 app.get('/mcp', handleSession);
 app.delete('/mcp', handleSession);
 
-// Health check
+// Health check (public, no auth required)
 app.get('/', (_req, res) => {
   res.json({
     name: 'O*NET MCP Server',
     version: '1.0.0',
     mode: ONET_CREDENTIALS ? 'live' : 'embedded',
+    auth: MCP_API_KEY ? 'api-key' : 'open',
     tools: ['onet_search', 'onet_details', 'onet_list'],
-    endpoint: `http://localhost:${PORT}/mcp`,
+    endpoint: '/mcp',
+    docs: 'Set X-Api-Key or Authorization: Bearer <key> header to authenticate',
   });
 });
 
@@ -336,6 +359,11 @@ app.listen(PORT, () => {
     console.log(`\n   ✅ Live mode — calling services.onetcenter.org (user: ${ONET_CREDENTIALS.username})`);
   } else {
     console.log(`\n   ℹ️  Embedded mode — copy .env.example → .env to enable live API`);
+  }
+  if (MCP_API_KEY) {
+    console.log(`   🔒 API key protection enabled (X-Api-Key or Authorization: Bearer)`);
+  } else {
+    console.log(`   ⚠️  No MCP_API_KEY set — endpoint is open (fine for local dev)`);
   }
   console.log();
 });
