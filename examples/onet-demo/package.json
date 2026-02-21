@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@mcp-ui/server": "workspace:*",
+    "@modelcontextprotocol/ext-apps": "^0.2.2",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
