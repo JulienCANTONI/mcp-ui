@@ -20,6 +20,7 @@ import type {
   DetailedWorkActivity,
 } from './onet-client.js';
 import type { OnetOccupation } from './onet-data.js';
+import { OCCUPATIONS } from './onet-data.js';
 
 // ── Shared CSS ─────────────────────────────────────────────────────────────
 
@@ -46,6 +47,7 @@ const BASE_CSS = `
   .btn-sm{padding:5px 10px;font-size:.78rem}
   .section{margin-bottom:20px}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
   .flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   .skill-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
   .skill-label{font-size:.82rem;width:160px;flex-shrink:0;color:#374151}
@@ -84,6 +86,9 @@ const BASE_CSS = `
   .ip-btn.sel-dislike{background:#fee2e2;border-color:#ef4444;color:#991b1b}
   .progress-bar{background:#e5e7eb;border-radius:6px;height:8px;margin-bottom:16px;overflow:hidden}
   .progress-fill{height:100%;background:linear-gradient(90deg,#10b981,#3b82f6);transition:width .3s}
+  .stat-card{background:linear-gradient(135deg,#1e3a5f,#2d5091);border-radius:12px;padding:14px 18px;color:#fff;text-align:center}
+  .stat-val{font-size:1.8rem;font-weight:800;color:#fbbf24;line-height:1}
+  .stat-lbl{font-size:.75rem;color:#93c5fd;margin-top:4px}
 `;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -121,20 +126,36 @@ const toolCall = (toolName: string, params: Record<string, unknown>) =>
 const esc = (s?: string | null) =>
   (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+// Traduction des perspectives d'emploi
+const outlookFr = (o: string): string => {
+  const map: Record<string, string> = {
+    'Much faster than average': 'Bien supérieure à la moyenne',
+    'Faster than average': 'Supérieure à la moyenne',
+    'Average': 'Dans la moyenne',
+    'Slower than average': 'Inférieure à la moyenne',
+  };
+  return map[o] ?? o;
+};
+
 const outlookBadge = (o: string) => {
   const cls = o.includes('Much') ? 'badge-green' : o.includes('Faster') ? 'badge-blue' : 'badge-gray';
-  return `<span class="badge ${cls}">${esc(o)}</span>`;
+  return `<span class="badge ${cls}">${esc(outlookFr(o))}</span>`;
 };
 
 const tagBadges = (occ: { bright_outlook?: boolean; green?: boolean; in_demand?: boolean }) => [
-  occ.bright_outlook ? '<span class="badge badge-green">&#9728; Bright Outlook</span>' : '',
-  occ.green ? '<span class="badge badge-green">&#9675; Green</span>' : '',
-  occ.in_demand ? '<span class="badge badge-blue">&#9670; In Demand</span>' : '',
+  occ.bright_outlook ? '<span class="badge badge-green">&#9728; Fort potentiel</span>' : '',
+  occ.green ? '<span class="badge badge-green">&#9675; Vert</span>' : '',
+  occ.in_demand ? '<span class="badge badge-blue">&#9670; En demande</span>' : '',
 ].filter(Boolean).join(' ');
 
-// ── 1. Search Results ──────────────────────────────────────────────────────
+// ── 1. Résultats de recherche ──────────────────────────────────────────────
 
 export function buildSearchResultsHTML(keyword: string, results: OnetOccupation[]): string {
+  // Afficher le dashboard si aucun mot-clé
+  if (!keyword) {
+    return buildOccupationPlaceholderHTML();
+  }
+
   const rows = results.length
     ? results.map(o => `
       <div class="row" onclick="${toolCall('onet_details', { code: o.code })}">
@@ -148,18 +169,18 @@ export function buildSearchResultsHTML(keyword: string, results: OnetOccupation[
         </div>
         <div style="text-align:right;flex-shrink:0">
           <div style="font-weight:700;color:#1e3a5f">${fmt$(o.median_wage)}</div>
-          <div class="muted">median / yr</div>
+          <div class="muted">médian / an</div>
         </div>
       </div>`).join('')
-    : '<div class="card" style="text-align:center;color:#6b7280;padding:32px">No results found for &ldquo;' + esc(keyword) + '&rdquo;</div>';
+    : `<div class="card" style="text-align:center;color:#6b7280;padding:32px">Aucun résultat pour &ldquo;${esc(keyword)}&rdquo;</div>`;
 
   return wrap(BASE_CSS, `
     <div style="padding:16px">
       <div class="input-row">
-        <input id="kw" type="text" placeholder="Search occupations…" value="${esc(keyword)}">
-        <button class="btn btn-primary" onclick="${toolCall('onet_search', { keyword: "(document.getElementById('kw').value)" })}; event.preventDefault(); window.parent.postMessage({type:'tool',payload:{toolName:'onet_search',params:{keyword:document.getElementById('kw').value}}}, '*')">Search</button>
+        <input id="kw" type="text" placeholder="Rechercher un métier…" value="${esc(keyword)}">
+        <button class="btn btn-primary" onclick="window.parent.postMessage({type:'tool',payload:{toolName:'onet_search',params:{keyword:document.getElementById('kw').value}}}, '*')">&#128269; Rechercher</button>
       </div>
-      <div class="muted" style="margin-bottom:10px">${results.length} result${results.length !== 1 ? 's' : ''} for &ldquo;${esc(keyword)}&rdquo;</div>
+      <div class="muted" style="margin-bottom:10px">${results.length} résultat${results.length !== 1 ? 's' : ''} pour &ldquo;${esc(keyword)}&rdquo;</div>
       ${rows}
     </div>
     <script>
@@ -169,19 +190,28 @@ export function buildSearchResultsHTML(keyword: string, results: OnetOccupation[
     </script>`);
 }
 
-// ── 2. Occupation Detail ───────────────────────────────────────────────────
+// ── 2. Détail d'un métier ──────────────────────────────────────────────────
 
 export function buildOccupationDetailHTML(occ: OnetOccupation): string {
   const buttons = [
-    { label: '&#128203; Career Report', tool: 'onet_career_report', params: { code: occ.code } },
-    { label: '&#127959; Work Profile', tool: 'onet_work_profile', params: { code: occ.code } },
-    { label: '&#128187; Tech Stack', tool: 'onet_tech_stack', params: { code: occ.code } },
-    { label: '&#128279; Related', tool: 'onet_related', params: { code: occ.code } },
-    { label: '&#10024; Interests', tool: 'onet_interests_education', params: { code: occ.code } },
+    { label: '&#128203; Rapport de carrière', tool: 'onet_career_report', params: { code: occ.code } },
+    { label: '&#127959; Profil de travail', tool: 'onet_work_profile', params: { code: occ.code } },
+    { label: '&#128187; Stack technique', tool: 'onet_tech_stack', params: { code: occ.code } },
+    { label: '&#128279; Métiers connexes', tool: 'onet_related', params: { code: occ.code } },
+    { label: '&#10024; Intérêts', tool: 'onet_interests_education', params: { code: occ.code } },
   ].map(b => `<button class="btn btn-secondary btn-sm" onclick="${toolCall(b.tool, b.params)}">${b.label}</button>`).join('');
 
-  const tasks = occ.tasks.map(t =>
-    `<li style="margin-bottom:4px">${esc(t)}</li>`).join('');
+  const tasksHTML = occ.tasks.length
+    ? `<ul style="padding-left:18px;color:#374151">
+        ${occ.tasks.map(t => `<li style="margin-bottom:6px">${esc(t)}</li>`).join('')}
+      </ul>`
+    : `<div style="text-align:center;padding:12px;color:#6b7280">
+        Tâches détaillées disponibles dans le rapport complet.<br>
+        <button class="btn btn-secondary btn-sm" style="margin-top:10px"
+          onclick="${toolCall('onet_career_report', { code: occ.code })}">
+          &#128203; Charger le rapport complet
+        </button>
+      </div>`;
 
   const styles = occ.work_styles.map(ws =>
     `<span class="tag">${esc(ws)}</span>`).join('');
@@ -192,39 +222,39 @@ export function buildOccupationDetailHTML(occ: OnetOccupation): string {
         <div class="flex" style="margin-bottom:8px">${tagBadges(occ)}</div>
         <h1>${esc(occ.title)}</h1>
         <div class="occ-code" style="color:#93c5fd;margin:4px 0 12px">${esc(occ.code)}</div>
-        <div class="wage">${fmt$(occ.median_wage)} <span style="font-size:.9rem;font-weight:400;color:#e5e7eb">/ yr</span></div>
+        <div class="wage">${fmt$(occ.median_wage)} <span style="font-size:.9rem;font-weight:400;color:#e5e7eb">/ an</span></div>
         <div style="color:#93c5fd;font-size:.82rem;margin-top:2px">
-          ${esc(occ.outlook)} &bull; ${occ.employment.toLocaleString()} employed
+          ${esc(outlookFr(occ.outlook))} &bull; ${occ.employment.toLocaleString()} employés
         </div>
       </div>
       <div class="action-bar">${buttons}</div>
       <div class="card">
         <p style="color:#374151;line-height:1.7">${esc(occ.description)}</p>
         <hr class="divider">
-        <div class="muted">Education: <strong>${esc(occ.education)}</strong></div>
+        <div class="muted">Formation : <strong>${esc(occ.education)}</strong></div>
       </div>
       <div class="grid2">
         <div class="card">
-          <h3>Top Skills</h3>
+          <h3>Principales compétences</h3>
           ${skillRows(occ.skills)}
         </div>
         <div class="card">
-          <h3>Knowledge Areas</h3>
+          <h3>Domaines de connaissance</h3>
           ${skillRows(occ.knowledge, 'bar-fill-green')}
         </div>
       </div>
       <div class="card">
-        <h3>Core Tasks</h3>
-        <ul style="padding-left:18px;color:#374151">${tasks}</ul>
+        <h3>&#128203; Tâches principales</h3>
+        ${tasksHTML}
       </div>
       <div class="card">
-        <h3>Work Styles</h3>
+        <h3>Styles de travail</h3>
         <div>${styles}</div>
       </div>
     </div>`);
 }
 
-// ── 3. Career Report (MNM) ─────────────────────────────────────────────────
+// ── 3. Rapport de carrière (MNM) ───────────────────────────────────────────
 
 export function buildCareerReportHTML(report: MnmCareerReport): string {
   const occ = report.occupation;
@@ -238,7 +268,7 @@ export function buildCareerReportHTML(report: MnmCareerReport): string {
   }).join(' ');
 
   const tasks = (report.on_the_job?.task ?? []).map(t =>
-    `<li style="margin-bottom:5px">${esc(t.statement)}${t.emerging ? '<span class="emerging">&#9889; Emerging</span>' : ''}</li>`
+    `<li style="margin-bottom:5px">${esc(t.statement)}${t.emerging ? '<span class="emerging">&#9889; Émergent</span>' : ''}</li>`
   ).join('');
 
   const eduCats = (report.education?.education_usually_needed?.category ?? []).map(c =>
@@ -254,24 +284,24 @@ export function buildCareerReportHTML(report: MnmCareerReport): string {
         <div class="flex" style="margin-bottom:8px">${tagBadges(tags)}</div>
         <h1>${esc(occ.title)}</h1>
         <div class="occ-code" style="color:#93c5fd">${esc(occ.code)}</div>
-        ${sal ? `<div class="wage" style="margin-top:10px">${fmt$(sal.annual_median)}<span style="font-size:.85rem;font-weight:400;color:#e5e7eb"> / yr median</span></div>
-        <div style="color:#93c5fd;font-size:.8rem">${fmt$(sal.annual_10th)} &ndash; ${fmt$(sal.annual_90th)} range</div>` : ''}
+        ${sal ? `<div class="wage" style="margin-top:10px">${fmt$(sal.annual_median)}<span style="font-size:.85rem;font-weight:400;color:#e5e7eb"> / an (médian)</span></div>
+        <div style="color:#93c5fd;font-size:.8rem">${fmt$(sal.annual_10th)} &ndash; ${fmt$(sal.annual_90th)} plage</div>` : ''}
         ${report.job_outlook?.category ? `<div style="color:#fbbf24;font-size:.85rem;margin-top:6px;font-weight:600">${esc(report.job_outlook.category.title)}</div>` : ''}
       </div>
       <div class="card"><p>${esc(occ.description)}</p></div>
-      ${tasks ? `<div class="card"><h3>On the Job</h3><ul style="padding-left:18px">${tasks}</ul></div>` : ''}
+      ${tasks ? `<div class="card"><h3>&#128203; Sur le terrain</h3><ul style="padding-left:18px">${tasks}</ul></div>` : ''}
       <div class="grid2">
-        ${report.skills?.element?.length ? `<div class="card"><h3>Skills</h3>${scoredRows(report.skills.element, 7)}</div>` : ''}
-        ${report.knowledge?.element?.length ? `<div class="card"><h3>Knowledge</h3>${scoredRows(report.knowledge.element, 7, 'bar-fill-green')}</div>` : ''}
+        ${report.skills?.element?.length ? `<div class="card"><h3>Compétences</h3>${scoredRows(report.skills.element, 7)}</div>` : ''}
+        ${report.knowledge?.element?.length ? `<div class="card"><h3>Connaissances</h3>${scoredRows(report.knowledge.element, 7, 'bar-fill-green')}</div>` : ''}
       </div>
-      ${report.abilities?.element?.length ? `<div class="card"><h3>Abilities</h3>${scoredRows(report.abilities.element, 7)}</div>` : ''}
-      ${styles ? `<div class="card"><h3>Work Styles</h3>${styles}</div>` : ''}
-      ${eduCats ? `<div class="card"><h3>Education Usually Needed</h3>${eduCats}</div>` : ''}
-      ${techItems ? `<div class="card"><h3>Technology</h3><div class="flex" style="margin-top:6px">${techItems}</div></div>` : ''}
+      ${report.abilities?.element?.length ? `<div class="card"><h3>Aptitudes</h3>${scoredRows(report.abilities.element, 7)}</div>` : ''}
+      ${styles ? `<div class="card"><h3>Styles de travail</h3>${styles}</div>` : ''}
+      ${eduCats ? `<div class="card"><h3>Formation généralement requise</h3>${eduCats}</div>` : ''}
+      ${techItems ? `<div class="card"><h3>Technologies</h3><div class="flex" style="margin-top:6px">${techItems}</div></div>` : ''}
     </div>`);
 }
 
-// ── 4. Work Profile ────────────────────────────────────────────────────────
+// ── 4. Profil de travail ───────────────────────────────────────────────────
 
 export function buildWorkProfileHTML(
   code: string, title: string,
@@ -281,7 +311,7 @@ export function buildWorkProfileHTML(
 
   const dwaGrouped = new Map<string, DetailedWorkActivity[]>();
   for (const d of (data.dwa.detailed_work_activity ?? [])) {
-    const parent = d.work_activity ?? 'Other';
+    const parent = d.work_activity ?? 'Autre';
     if (!dwaGrouped.has(parent)) dwaGrouped.set(parent, []);
     dwaGrouped.get(parent)!.push(d);
   }
@@ -300,14 +330,14 @@ export function buildWorkProfileHTML(
     </div>`;
   }).join('');
 
-  const ctxGroups: Record<string, WorkContextItem[]> = { Physical: [], Social: [], Structural: [] };
+  const ctxGroups: Record<string, WorkContextItem[]> = { Physique: [], Social: [], Structurel: [] };
   const physKeywords = ['Physical', 'Outdoor', 'Hazard', 'Protective', 'Radiation', 'Contaminant', 'Minor Burns'];
   const socKeywords = ['Contact', 'Work With', 'Deal', 'Coordinate', 'Responsibility', 'Conflict'];
   for (const c of (data.workContext.element ?? [])) {
     const n = c.name;
-    if (physKeywords.some(k => n.includes(k))) ctxGroups.Physical.push(c);
+    if (physKeywords.some(k => n.includes(k))) ctxGroups.Physique.push(c);
     else if (socKeywords.some(k => n.includes(k))) ctxGroups.Social.push(c);
-    else ctxGroups.Structural.push(c);
+    else ctxGroups.Structurel.push(c);
   }
 
   const ctxHTML = Object.entries(ctxGroups).filter(([, items]) => items.length).map(([grp, items]) =>
@@ -327,15 +357,15 @@ export function buildWorkProfileHTML(
           <h1>${esc(title)}</h1>
           <div class="occ-code">${esc(code)}</div>
         </div>
-        <button class="btn btn-secondary btn-sm" onclick="${toolCall('onet_details', { code })}" style="margin-left:auto">&#8592; Back</button>
+        <button class="btn btn-secondary btn-sm" onclick="${toolCall('onet_details', { code })}" style="margin-left:auto">&#8592; Retour</button>
       </div>
-      <div class="card"><h2>Detailed Work Activities</h2>${dwaHTML}</div>
-      <div class="card"><h2>Work Context</h2>${ctxHTML}</div>
-      ${abilitiesHTML ? `<div class="card"><h2>Abilities</h2>${abilitiesHTML}</div>` : ''}
+      <div class="card"><h2>Activités de travail détaillées</h2>${dwaHTML}</div>
+      <div class="card"><h2>Contexte de travail</h2>${ctxHTML}</div>
+      ${abilitiesHTML ? `<div class="card"><h2>Aptitudes</h2>${abilitiesHTML}</div>` : ''}
     </div>`);
 }
 
-// ── 5. Tech Stack ──────────────────────────────────────────────────────────
+// ── 5. Stack technique ─────────────────────────────────────────────────────
 
 export function buildTechStackHTML(code: string, title: string, techSkills: OnlineTechSkillsResponse, tools: OnlineToolsResponse): string {
   const renderTech = (items: TechSkillItem[]) => {
@@ -345,15 +375,15 @@ export function buildTechStackHTML(code: string, title: string, techSkills: Onli
 
     const catGroups = new Map<string, TechSkillItem[]>();
     for (const t of rest) {
-      const c = t.category ?? 'Other';
+      const c = t.category ?? 'Autre';
       if (!catGroups.has(c)) catGroups.set(c, []);
       catGroups.get(c)!.push(t);
     }
 
     return `
-      ${hot.length ? `<div style="margin-bottom:12px"><div class="muted" style="margin-bottom:6px;font-weight:600">&#128293; Hot Technology</div>
+      ${hot.length ? `<div style="margin-bottom:12px"><div class="muted" style="margin-bottom:6px;font-weight:600">&#128293; Technologies tendance</div>
         <div class="flex">${hot.map(t => `<span class="badge badge-orange" style="font-size:.8rem;padding:4px 10px">${esc(t.name)}</span>`).join('')}</div></div>` : ''}
-      ${demand.length ? `<div style="margin-bottom:12px"><div class="muted" style="margin-bottom:6px;font-weight:600">&#128640; In Demand</div>
+      ${demand.length ? `<div style="margin-bottom:12px"><div class="muted" style="margin-bottom:6px;font-weight:600">&#128640; En demande</div>
         <div class="flex">${demand.map(t => `<span class="badge badge-blue" style="font-size:.8rem;padding:4px 10px">${esc(t.name)}</span>`).join('')}</div></div>` : ''}
       ${[...catGroups.entries()].map(([cat, ts]) =>
         `<div style="margin-bottom:10px"><div class="muted" style="margin-bottom:4px">${esc(cat)}</div>
@@ -369,14 +399,14 @@ export function buildTechStackHTML(code: string, title: string, techSkills: Onli
     <div style="padding:16px">
       <div class="flex" style="margin-bottom:16px">
         <div><h1>${esc(title)}</h1><div class="occ-code">${esc(code)}</div></div>
-        <button class="btn btn-secondary btn-sm" onclick="${toolCall('onet_details', { code })}" style="margin-left:auto">&#8592; Back</button>
+        <button class="btn btn-secondary btn-sm" onclick="${toolCall('onet_details', { code })}" style="margin-left:auto">&#8592; Retour</button>
       </div>
-      <div class="card"><h2>Technology Skills</h2>${renderTech(techSkills.technology_skills ?? [])}</div>
-      ${toolsHTML ? `<div class="card"><h2>Tools &amp; Equipment</h2>${toolsHTML}</div>` : ''}
+      <div class="card"><h2>Compétences technologiques</h2>${renderTech(techSkills.technology_skills ?? [])}</div>
+      ${toolsHTML ? `<div class="card"><h2>Outils &amp; Équipements</h2>${toolsHTML}</div>` : ''}
     </div>`);
 }
 
-// ── 6. Interests + Education ───────────────────────────────────────────────
+// ── 6. Intérêts + Formation ────────────────────────────────────────────────
 
 export function buildInterestsEducationHTML(
   code: string, title: string,
@@ -413,30 +443,30 @@ export function buildInterestsEducationHTML(
     <div style="padding:16px">
       <div class="flex" style="margin-bottom:16px">
         <div><h1>${esc(title)}</h1><div class="occ-code">${esc(code)}</div></div>
-        <button class="btn btn-secondary btn-sm" onclick="${toolCall('onet_details', { code })}" style="margin-left:auto">&#8592; Back</button>
+        <button class="btn btn-secondary btn-sm" onclick="${toolCall('onet_details', { code })}" style="margin-left:auto">&#8592; Retour</button>
       </div>
       <div class="card">
-        <h2>Holland RIASEC Interests</h2>
-        ${hp ? `<div style="margin-bottom:10px">High-Point Code: <strong style="font-size:1.1rem;color:#3b82f6">${esc(hp)}</strong></div>` : ''}
+        <h2>Intérêts RIASEC Holland</h2>
+        ${hp ? `<div style="margin-bottom:10px">Code dominant : <strong style="font-size:1.1rem;color:#3b82f6">${esc(hp)}</strong></div>` : ''}
         <div class="riasec-grid">${riasecCells}</div>
       </div>
       ${jz ? `<div class="card">
-        <h2>Job Zone ${jz.value}: ${esc(jz.title ?? '')}</h2>
+        <h2>Zone d'emploi ${jz.value} : ${esc(jz.title ?? '')}</h2>
         <div style="margin-bottom:10px">${pips}</div>
         <p style="color:#374151;margin-bottom:8px">${esc(jz.description ?? '')}</p>
-        ${jz.education ? `<div class="muted"><strong>Education:</strong> ${esc(jz.education)}</div>` : ''}
-        ${jz.related_experience ? `<div class="muted"><strong>Experience:</strong> ${esc(jz.related_experience)}</div>` : ''}
+        ${jz.education ? `<div class="muted"><strong>Formation :</strong> ${esc(jz.education)}</div>` : ''}
+        ${jz.related_experience ? `<div class="muted"><strong>Expérience :</strong> ${esc(jz.related_experience)}</div>` : ''}
       </div>` : ''}
-      ${eduCats ? `<div class="card"><h2>Education Usually Needed</h2>${eduCats}</div>` : ''}
+      ${eduCats ? `<div class="card"><h2>Formation généralement requise</h2>${eduCats}</div>` : ''}
     </div>`);
 }
 
-// ── 7. Related Occupations ─────────────────────────────────────────────────
+// ── 7. Métiers connexes ────────────────────────────────────────────────────
 
 export function buildRelatedHTML(code: string, title: string, related: OnlineRelatedOccupations): string {
   const rows = (related.occupation ?? []).map(o => {
     const lvlBadge = o.related_level != null
-      ? `<span class="badge badge-purple">Level ${o.related_level}</span>`
+      ? `<span class="badge badge-purple">Niveau ${o.related_level}</span>`
       : '';
     return `<div class="row" onclick="${toolCall('onet_details', { code: o.code })}">
       <div style="flex:1">
@@ -451,14 +481,14 @@ export function buildRelatedHTML(code: string, title: string, related: OnlineRel
   return wrap(BASE_CSS, `
     <div style="padding:16px">
       <div class="flex" style="margin-bottom:16px">
-        <div><h1>Related Occupations</h1><div class="muted">${esc(title)}</div></div>
-        <button class="btn btn-secondary btn-sm" onclick="${toolCall('onet_details', { code })}" style="margin-left:auto">&#8592; Back</button>
+        <div><h1>Métiers connexes</h1><div class="muted">${esc(title)}</div></div>
+        <button class="btn btn-secondary btn-sm" onclick="${toolCall('onet_details', { code })}" style="margin-left:auto">&#8592; Retour</button>
       </div>
-      <div class="card">${rows || '<div class="muted" style="text-align:center;padding:20px">No related occupations found.</div>'}</div>
+      <div class="card">${rows || '<div class="muted" style="text-align:center;padding:20px">Aucun métier connexe trouvé.</div>'}</div>
     </div>`);
 }
 
-// ── 8. Bright Outlook Listings ─────────────────────────────────────────────
+// ── 8. Métiers à fort potentiel ────────────────────────────────────────────
 
 export function buildBrightOutlookHTML(listings: MnmListings): string {
   const rows = (listings.occupation ?? []).map(o =>
@@ -473,14 +503,14 @@ export function buildBrightOutlookHTML(listings: MnmListings): string {
   return wrap(BASE_CSS, `
     <div style="padding:16px">
       <div class="header-grad" style="margin-bottom:16px">
-        <h1>&#9728; Bright Outlook Careers</h1>
-        <div style="color:#93c5fd;margin-top:4px">${listings.total ?? 0} occupations with strong projected growth</div>
+        <h1>&#9728; Métiers à fort potentiel</h1>
+        <div style="color:#93c5fd;margin-top:4px">${listings.total ?? 0} métiers avec une forte croissance prévue</div>
       </div>
-      <div class="card">${rows || '<div class="muted" style="text-align:center;padding:20px">No listings found.</div>'}</div>
+      <div class="card">${rows || '<div class="muted" style="text-align:center;padding:20px">Aucun résultat.</div>'}</div>
     </div>`);
 }
 
-// ── 9. Browse Industries ───────────────────────────────────────────────────
+// ── 9. Explorer par secteur ────────────────────────────────────────────────
 
 export function buildBrowseHTML(industries: MnmBrowseIndustries | null, industry: MnmBrowseIndustry | null): string {
   if (industry) {
@@ -495,33 +525,34 @@ export function buildBrowseHTML(industries: MnmBrowseIndustries | null, industry
       <div style="padding:16px">
         <div class="flex" style="margin-bottom:16px">
           <div>
-            <h1>${esc(industry.industry?.title ?? 'Industry')}</h1>
-            <div class="muted">Careers in this industry</div>
+            <h1>${esc(industry.industry?.title ?? 'Secteur')}</h1>
+            <div class="muted">Métiers dans ce secteur</div>
           </div>
-          <button class="btn btn-secondary btn-sm" onclick="${toolCall('onet_browse', {})}" style="margin-left:auto">&#8592; All Industries</button>
+          <button class="btn btn-secondary btn-sm" onclick="${toolCall('onet_browse', {})}" style="margin-left:auto">&#8592; Tous les secteurs</button>
         </div>
-        ${(industry.most?.career ?? []).length ? `<div class="card"><h2>Most In This Industry</h2>${makeRows(industry.most!.career)}</div>` : ''}
-        ${(industry.some?.career ?? []).length ? `<div class="card"><h2>Some Work In This Industry</h2>${makeRows(industry.some!.career)}</div>` : ''}
+        ${(industry.most?.career ?? []).length ? `<div class="card"><h2>Principalement dans ce secteur</h2>${makeRows(industry.most!.career)}</div>` : ''}
+        ${(industry.some?.career ?? []).length ? `<div class="card"><h2>Partiellement dans ce secteur</h2>${makeRows(industry.some!.career)}</div>` : ''}
       </div>`);
   }
 
+  // FIX : paramètre 'code' (et non 'industry_code') attendu par l'outil onet_browse
   const indRows = (industries?.industry ?? []).map(i =>
-    `<div class="row" onclick="${toolCall('onet_browse', { industry_code: i.code })}">
+    `<div class="row" onclick="${toolCall('onet_browse', { code: i.code })}">
       <div style="flex:1"><div class="occ-title">${esc(i.title)}</div></div>
-      <span class="badge badge-gray">${i.total ?? ''} careers</span>
+      <span class="badge badge-gray">${i.total ?? ''} métiers</span>
     </div>`).join('');
 
   return wrap(BASE_CSS, `
     <div style="padding:16px">
       <div class="header-grad" style="margin-bottom:16px">
-        <h1>&#127963; Browse by Industry</h1>
-        <div style="color:#93c5fd;margin-top:4px">Select an industry to explore careers</div>
+        <h1>&#127963; Explorer par secteur</h1>
+        <div style="color:#93c5fd;margin-top:4px">Sélectionnez un secteur pour explorer les métiers</div>
       </div>
-      <div class="card">${indRows || '<div class="muted" style="text-align:center;padding:20px">Loading…</div>'}</div>
+      <div class="card">${indRows || '<div class="muted" style="text-align:center;padding:20px">Chargement…</div>'}</div>
     </div>`);
 }
 
-// ── 10. Interest Profiler Questions ────────────────────────────────────────
+// ── 10. Profil d'intérêts ─────────────────────────────────────────────────
 
 export function buildInterestProfilerHTML(questions: {
   question?: Array<{ id?: string | number; text: string; area?: string }>;
@@ -535,10 +566,11 @@ export function buildInterestProfilerHTML(questions: {
     return `<div class="ip-q" id="q-${qId}">
       <div class="ip-q-text"><strong>${i + 1}.</strong> ${esc(q.text)}</div>
       <div class="ip-btns">
-        ${(['Like', 'Unsure', 'Dislike'] as const).map(opt =>
-          `<button class="ip-btn" data-qid="${qId}" data-val="${opt.toLowerCase()}"
-            onclick="selectAnswer('${qId}', '${opt.toLowerCase()}', this)">${opt}</button>`
-        ).join('')}
+        ${(['J\'aime', 'Incertain', 'Je n\'aime pas'] as const).map((opt, idx) => {
+          const val = ['like', 'unsure', 'dislike'][idx];
+          return `<button class="ip-btn" data-qid="${qId}" data-val="${val}"
+            onclick="selectAnswer('${qId}', '${val}', this)">${opt}</button>`;
+        }).join('')}
       </div>
     </div>`;
   }).join('');
@@ -546,11 +578,11 @@ export function buildInterestProfilerHTML(questions: {
   return wrap(BASE_CSS, `
     <div style="padding:16px">
       <div class="card" style="margin-bottom:16px">
-        <h1 style="margin-bottom:4px">&#127775; Interest Profiler</h1>
-        <div class="muted">Answer all ${total} questions to find matching careers</div>
+        <h1 style="margin-bottom:4px">&#127775; Profil d'intérêts</h1>
+        <div class="muted">Répondez aux ${total} questions pour trouver les métiers correspondants</div>
         <div style="margin-top:10px">
           <div class="flex" style="margin-bottom:4px">
-            <span class="muted" id="progress-label">0 of ${total} answered</span>
+            <span class="muted" id="progress-label">0 sur ${total} répondues</span>
           </div>
           <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
         </div>
@@ -558,7 +590,7 @@ export function buildInterestProfilerHTML(questions: {
       <div class="card">${qHTML}</div>
       <div id="submit-wrap" style="display:none;margin-top:8px">
         <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="submitAnswers()">
-          &#127919; Find Matching Careers
+          &#127919; Trouver les métiers correspondants
         </button>
       </div>
     </div>
@@ -572,18 +604,19 @@ export function buildInterestProfilerHTML(questions: {
         const cls = val === 'like' ? 'sel-like' : val === 'unsure' ? 'sel-unsure' : 'sel-dislike';
         btn.className = 'ip-btn ' + cls;
         const answered = Object.keys(answers).length;
-        document.getElementById('progress-label').textContent = answered + ' of ' + total + ' answered';
+        document.getElementById('progress-label').textContent = answered + ' sur ' + total + ' répondues';
         document.getElementById('progress-fill').style.width = Math.round((answered / total) * 100) + '%';
         if (answered >= total) document.getElementById('submit-wrap').style.display = 'block';
       }
       function submitAnswers() {
         const result = Object.entries(answers).map(([id, v]) => id + ':' + v).join(',');
-        window.parent.postMessage({type:'tool',payload:{toolName:'onet_interest_match',params:{answers: result}}}, '*');
+        // FIX : nom correct de l'outil (onet_match_careers, pas onet_interest_match)
+        window.parent.postMessage({type:'tool',payload:{toolName:'onet_match_careers',params:{answers: result}}}, '*');
       }
     </script>`);
 }
 
-// ── 11. Interest Match Results ─────────────────────────────────────────────
+// ── 11. Correspondances d'intérêts ────────────────────────────────────────
 
 export function buildInterestMatchHTML(careers: {
   career?: Array<{ code: string; title: string; fit?: string; tags?: { bright_outlook?: boolean } }>;
@@ -602,6 +635,12 @@ export function buildInterestMatchHTML(careers: {
     </div>`;
   }).join('');
 
+  const fitFr = (fit?: string) => {
+    if (fit === 'Best') return 'Excellent';
+    if (fit === 'Great') return 'Très bien';
+    return fit ?? '';
+  };
+
   const careerRows = (careers.career ?? []).map(c => {
     const fitBadge = c.fit === 'Best' ? 'badge-green' : c.fit === 'Great' ? 'badge-blue' : 'badge-gray';
     return `<div class="row" onclick="${toolCall('onet_career_report', { code: c.code })}">
@@ -609,51 +648,104 @@ export function buildInterestMatchHTML(careers: {
         <div class="occ-title">${esc(c.title)}</div>
         <div class="occ-code">${esc(c.code)}</div>
       </div>
-      ${c.fit ? `<span class="badge ${fitBadge}">${esc(c.fit)} Fit</span>` : ''}
-      ${c.tags?.bright_outlook ? '<span class="badge badge-green">&#9728; Bright</span>' : ''}
+      ${c.fit ? `<span class="badge ${fitBadge}">${esc(fitFr(c.fit))}</span>` : ''}
+      ${c.tags?.bright_outlook ? '<span class="badge badge-green">&#9728; Fort potentiel</span>' : ''}
     </div>`;
   }).join('');
 
   return wrap(BASE_CSS, `
     <div style="padding:16px">
       <div class="header-grad" style="margin-bottom:16px">
-        <h1>&#127775; Your Career Matches</h1>
-        <div style="color:#93c5fd;margin-top:4px">${(careers.career ?? []).length} careers match your interests</div>
+        <h1>&#127775; Vos métiers correspondants</h1>
+        <div style="color:#93c5fd;margin-top:4px">${(careers.career ?? []).length} métiers correspondent à vos intérêts</div>
       </div>
-      ${careers.area?.length ? `<div class="card"><h2>Your Interest Profile</h2><div class="riasec-grid">${riasecCells}</div></div>` : ''}
-      <div class="card">${careerRows || '<div class="muted" style="text-align:center;padding:20px">No matches found.</div>'}</div>
+      ${careers.area?.length ? `<div class="card"><h2>Votre profil d'intérêts</h2><div class="riasec-grid">${riasecCells}</div></div>` : ''}
+      <div class="card">${careerRows || '<div class="muted" style="text-align:center;padding:20px">Aucune correspondance trouvée.</div>'}</div>
     </div>`);
 }
 
-// ── 12. Placeholder ────────────────────────────────────────────────────────
+// ── 12. Dashboard (page d'accueil) ─────────────────────────────────────────
 
 export function buildOccupationPlaceholderHTML(): string {
+  // Statistiques calculées depuis les données intégrées
+  const brightCount = OCCUPATIONS.filter(o => o.bright_outlook).length;
+  const inDemandCount = OCCUPATIONS.filter(o => o.in_demand).length;
+  const avgSalary = Math.round(
+    OCCUPATIONS.reduce((s, o) => s + o.median_wage, 0) / OCCUPATIONS.length
+  );
+
+  const statCards = `
+    <div class="grid3" style="margin-bottom:16px">
+      <div class="stat-card">
+        <div class="stat-val">${OCCUPATIONS.length}</div>
+        <div class="stat-lbl">Métiers disponibles</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val">${brightCount}</div>
+        <div class="stat-lbl">&#9728; Fort potentiel</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val">$${Math.round(avgSalary / 1000)}k</div>
+        <div class="stat-lbl">Salaire médian moyen</div>
+      </div>
+    </div>`;
+
+  const occRows = OCCUPATIONS.map(o => `
+    <div class="row" onclick="${toolCall('onet_details', { code: o.code })}">
+      <div style="flex:1">
+        <div class="occ-title">${esc(o.title)}</div>
+        <div class="flex" style="margin-top:4px">
+          <span class="occ-code">${esc(o.code)}</span>
+          ${outlookBadge(o.outlook)}
+          ${tagBadges(o)}
+        </div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-weight:700;color:#1e3a5f">${fmt$(o.median_wage)}</div>
+        <div class="muted">/ an</div>
+      </div>
+    </div>`).join('');
+
   const quickLinks = [
-    { label: '&#9728; Bright Outlook Careers', tool: 'onet_bright_outlook', params: {} },
-    { label: '&#127963; Browse by Industry', tool: 'onet_browse', params: {} },
-    { label: '&#127775; Interest Profiler', tool: 'onet_interest_profiler', params: {} },
-  ].map(l => `<button class="btn btn-secondary" style="width:100%;justify-content:center;margin-bottom:8px" onclick="${toolCall(l.tool, l.params)}">${l.label}</button>`).join('');
+    { label: '&#9728; Métiers à fort potentiel', tool: 'onet_bright_outlook', params: {} },
+    { label: '&#127963; Explorer par secteur', tool: 'onet_browse', params: {} },
+    { label: '&#127775; Profil d\'intérêts', tool: 'onet_interest_profiler', params: {} },
+  ].map(l =>
+    `<button class="btn btn-secondary" style="flex:1;justify-content:center;min-width:140px" onclick="${toolCall(l.tool, l.params)}">${l.label}</button>`
+  ).join('');
 
   return wrap(BASE_CSS, `
     <div style="padding:16px">
-      <div class="header-grad" style="text-align:center;padding:32px 20px">
-        <div style="font-size:3rem;margin-bottom:12px">&#128269;</div>
-        <h1 style="font-size:1.6rem;margin-bottom:8px">O*NET Career Explorer</h1>
-        <p style="color:#93c5fd">Search for any occupation to explore skills, wages, outlook, and more</p>
-      </div>
-      <div class="card">
-        <h2 style="margin-bottom:12px">Search Occupations</h2>
-        <div class="input-row">
-          <input id="kw" type="text" placeholder="e.g. Software Developer, Nurse, Data Analyst…">
-          <button class="btn btn-primary" id="search-btn">Search</button>
+      <div class="header-grad" style="margin-bottom:16px">
+        <h1 style="font-size:1.5rem;margin-bottom:6px">&#128269; Explorateur de Métiers O*NET</h1>
+        <p style="color:#93c5fd;margin-bottom:16px">Recherchez un métier pour explorer compétences, salaires et perspectives</p>
+        <div class="input-row" style="margin-bottom:0">
+          <input id="kw" type="text" placeholder="ex : Développeur, Infirmier, Analyste…" style="border-color:rgba(147,197,253,.5)">
+          <button class="btn btn-primary" id="search-btn">&#128269; Rechercher</button>
         </div>
-        <div class="muted" style="text-align:center;margin-bottom:12px">— or explore —</div>
-        ${quickLinks}
       </div>
+
+      ${statCards}
+
+      <div class="card">
+        <h2 style="margin-bottom:12px">&#128203; Tableau de bord — Tous les métiers</h2>
+        ${occRows}
+      </div>
+
       <div class="card" style="background:linear-gradient(135deg,#f0f9ff,#e0f2fe)">
-        <h3 style="margin-bottom:8px">&#128161; What you can explore</h3>
+        <h3 style="margin-bottom:10px">&#128640; Explorer</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">${quickLinks}</div>
+      </div>
+
+      <div class="card" style="background:linear-gradient(135deg,#fefce8,#fef9c3)">
+        <h3 style="margin-bottom:8px">&#128161; Ce que vous pouvez explorer</h3>
         <div class="grid2">
-          ${[['&#128203;', 'Career Reports', 'Salary, outlook, tasks'], ['&#127959;', 'Work Profiles', 'DWA, GWA, context'], ['&#128187;', 'Tech Stacks', 'Hot tech, tools'], ['&#127775;', 'Interest Match', 'RIASEC profiler']].map(([icon, ttl, desc]) =>
+          ${[
+            ['&#128203;', 'Rapports de carrière', 'Salaire, perspectives, tâches'],
+            ['&#127959;', 'Profils de travail', 'Activités, contexte, aptitudes'],
+            ['&#128187;', 'Stack technique', 'Technologies tendance, outils'],
+            ['&#127775;', 'Profil d\'intérêts', 'Correspondance RIASEC'],
+          ].map(([icon, ttl, desc]) =>
             `<div style="padding:8px;border-radius:8px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.06)">
               <div style="font-size:1.3rem">${icon}</div>
               <div style="font-weight:600;font-size:.85rem">${ttl}</div>
