@@ -132,6 +132,32 @@ app.get('/ui/occupation/:code', (req, res) => {
 function createMcpServer(baseUrl: string): McpServer {
   const server = new McpServer({ name: 'onet-mcp-server', version: '1.0.0' });
 
+  // ── tool: use_space ───────────────────────────────────────────────────────
+  // Claude.ai calls this tool before using other tools in a "space" connector.
+  server.registerTool(
+    'use_space',
+    {
+      title: 'Use O*NET UI Space',
+      description: 'Initialize the O*NET UI space. Call this before using other O*NET tools.',
+      inputSchema: {
+        space_id: z.string().optional().describe('Space identifier'),
+      },
+    },
+    async () => ({
+      content: [
+        {
+          type: 'text',
+          text:
+            'O*NET UI space ready.\n\n' +
+            'Available tools:\n' +
+            '• onet_search <keyword> — search occupations with interactive UI\n' +
+            '• onet_details <code>  — full occupation profile with interactive UI\n' +
+            '• onet_list            — list embedded occupations',
+        },
+      ],
+    }),
+  );
+
   // ── tool: onet_search ────────────────────────────────────────────────────
   server.registerTool(
     'onet_search',
