@@ -5,8 +5,8 @@
  *   onet_search   – search occupations by keyword → returns MCP-UI resource
  *   onet_details  – get occupation detail by SOC code → returns MCP-UI resource
  *
- * The resources use the MCP Apps adapter connector (text/html;profile=mcp-app)
- * which is one of the two connectors integrated in the client SDK.
+ * Resources use externalUrl (not rawHtml) so the HTML is served by Express
+ * on demand and only a short URL goes into the LLM context (~100 chars vs ~32 KB).
  *
  * Configuration (via environment variables, never hardcoded):
  *   ONET_USERNAME  – O*NET Web Services username
@@ -26,18 +26,14 @@ import cors from 'cors';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import { createUIResource } from '@mcp-ui/server';
+import { createUIResource, wrapHtmlWithAdapters } from '@mcp-ui/server';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
 
 import { searchOccupations, getOccupation, OCCUPATIONS } from './onet-data.js';
 import { liveSearch, liveOccupationSummary, type OnetReport } from './onet-client.js';
 import type { OnetOccupation } from './onet-data.js';
-import {
-  buildSearchResultsHTML,
-  buildOccupationDetailHTML,
-  buildSummaryHTML,
-} from './ui-templates.js';
+import { buildSearchResultsHTML, buildOccupationDetailHTML } from './ui-templates.js';
 
 // ---------------------------------------------------------------------------
 // Credentials — read from environment, never hardcoded
@@ -88,6 +84,13 @@ function mapLiveOccupation(
   };
 }
 
+// ---------------------------------------------------------------------------
+// In-memory caches (keyword → results, code → occupation)
+// These are populated by the MCP tools and read by the HTML routes.
+// ---------------------------------------------------------------------------
+const searchCache = new Map<string, OnetOccupation[]>();
+const occupationCache = new Map<string, OnetOccupation>();
+
 const app = express();
 const PORT = 3002;
 
@@ -97,9 +100,36 @@ app.use(express.json());
 const transports: Record<string, StreamableHTTPServerTransport> = {};
 
 // ---------------------------------------------------------------------------
-// Session factory
+// HTML routes — serve pages for externalUrl resources
+// The adapter script is injected here so only a URL goes into LLM context.
 // ---------------------------------------------------------------------------
-function createMcpServer(): McpServer {
+
+app.get('/ui/search', (req, res) => {
+  const keyword = (req.query.keyword as string) ?? '';
+  const results = searchCache.get(keyword) ?? [];
+  const html = buildSearchResultsHTML(keyword, results);
+  const htmlWithAdapter = wrapHtmlWithAdapters(html, { mcpApps: { enabled: true } });
+  res.setHeader('Content-Type', 'text/html');
+  res.send(htmlWithAdapter);
+});
+
+app.get('/ui/occupation/:code', (req, res) => {
+  const code = req.params.code;
+  const occ = occupationCache.get(code);
+  if (!occ) {
+    res.status(404).send('Occupation not found — try calling onet_details again.');
+    return;
+  }
+  const html = buildOccupationDetailHTML(occ);
+  const htmlWithAdapter = wrapHtmlWithAdapters(html, { mcpApps: { enabled: true } });
+  res.setHeader('Content-Type', 'text/html');
+  res.send(htmlWithAdapter);
+});
+
+// ---------------------------------------------------------------------------
+// Session factory — receives the base URL so tools can build externalUrl links
+// ---------------------------------------------------------------------------
+function createMcpServer(baseUrl: string): McpServer {
   const server = new McpServer({ name: 'onet-mcp-server', version: '1.0.0' });
 
   // ── tool: onet_search ────────────────────────────────────────────────────
@@ -146,21 +176,8 @@ function createMcpServer(): McpServer {
         results = searchOccupations(keyword);
       }
 
-      const summaryResource = createUIResource({
-        uri: `ui://onet/search-summary/${encodeURIComponent(keyword)}`,
-        content: { type: 'rawHtml', htmlString: buildSummaryHTML(results) },
-        encoding: 'text',
-        adapters: { mcpApps: { enabled: true } },
-        uiMetadata: { 'preferred-frame-size': ['100%', '280px'] },
-      });
-
-      const fullResource = createUIResource({
-        uri: `ui://onet/search-full/${encodeURIComponent(keyword)}`,
-        content: { type: 'rawHtml', htmlString: buildSearchResultsHTML(keyword, results) },
-        encoding: 'text',
-        adapters: { mcpApps: { enabled: true } },
-        uiMetadata: { 'preferred-frame-size': ['100%', '600px'] },
-      });
+      // Cache results so the /ui/search route can serve them
+      searchCache.set(keyword, results);
 
       const textSummary =
         results.length > 0
@@ -174,8 +191,19 @@ function createMcpServer(): McpServer {
               .join('\n')
           : `No occupations found for "${keyword}". Try a broader term.`;
 
+      // externalUrl: only the URL goes into the LLM context (~80 chars, not ~32 KB)
+      const uiResource = createUIResource({
+        uri: `ui://onet/search/${encodeURIComponent(keyword)}`,
+        content: {
+          type: 'externalUrl',
+          iframeUrl: `${baseUrl}/ui/search?keyword=${encodeURIComponent(keyword)}`,
+        },
+        encoding: 'text',
+        uiMetadata: { 'preferred-frame-size': ['100%', '500px'] },
+      });
+
       return {
-        content: [{ type: 'text', text: textSummary }, summaryResource, fullResource],
+        content: [{ type: 'text', text: textSummary }, uiResource],
       };
     },
   );
@@ -224,13 +252,8 @@ function createMcpServer(): McpServer {
         };
       }
 
-      const uiResource = createUIResource({
-        uri: `ui://onet/occupation/${occ.code}`,
-        content: { type: 'rawHtml', htmlString: buildOccupationDetailHTML(occ) },
-        encoding: 'text',
-        adapters: { mcpApps: { enabled: true } },
-        uiMetadata: { 'preferred-frame-size': ['100%', '700px'] },
-      });
+      // Cache occupation so the /ui/occupation/:code route can serve it
+      occupationCache.set(occ.code, occ);
 
       const textSummary =
         `**${occ.title}** (${occ.code})\n` +
@@ -245,6 +268,17 @@ function createMcpServer(): McpServer {
           .slice(0, 3)
           .map((s) => s.name)
           .join(', ')}`;
+
+      // externalUrl: only the URL goes into the LLM context (~80 chars, not ~16 KB)
+      const uiResource = createUIResource({
+        uri: `ui://onet/occupation/${occ.code}`,
+        content: {
+          type: 'externalUrl',
+          iframeUrl: `${baseUrl}/ui/occupation/${encodeURIComponent(occ.code)}`,
+        },
+        encoding: 'text',
+        uiMetadata: { 'preferred-frame-size': ['100%', '700px'] },
+      });
 
       return {
         content: [{ type: 'text', text: textSummary }, uiResource],
@@ -315,7 +349,15 @@ app.post('/mcp', async (req, res) => {
       }
     };
 
-    const server = createMcpServer();
+    // Detect base URL from the incoming request so externalUrl links work in
+    // both local dev (http://localhost:3002) and remote environments (Codespaces, etc.)
+    const protocol =
+      (req.headers['x-forwarded-proto'] as string | undefined) ??
+      (req.secure ? 'https' : 'http');
+    const host = req.headers.host ?? `localhost:${PORT}`;
+    const baseUrl = `${protocol}://${host}`;
+
+    const server = createMcpServer(baseUrl);
     await server.connect(transport);
   } else {
     res.status(400).json({ error: { message: 'Bad Request: missing session' } });
@@ -354,7 +396,7 @@ app.listen(PORT, () => {
   console.log(`\n🏷️  O*NET MCP Server running at http://localhost:${PORT}`);
   console.log(`   MCP endpoint: http://localhost:${PORT}/mcp`);
   console.log(`\n   Tools: onet_search | onet_details | onet_list`);
-  console.log(`\n   Adapter connector: MCP Apps SEP (text/html;profile=mcp-app)`);
+  console.log(`\n   UI resources use externalUrl — HTML served on demand, not embedded in context`);
   if (ONET_CREDENTIALS) {
     console.log(`\n   ✅ Live mode — calling services.onetcenter.org (user: ${ONET_CREDENTIALS.username})`);
   } else {
